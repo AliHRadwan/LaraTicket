@@ -20,20 +20,23 @@ class OrderFactory extends Factory
      */
     public function definition(): array
     {
-        $event = Event::random();
-        $user = User::random();
-        if (!$user) {
-            $user = User::factory()->create();
-        }
+        $event = Event::inRandomOrder()->first();
         if (!$event) {
             $event = Event::factory()->create();
         }
+        $user = User::inRandomOrder()->first();
+        if (!$user) {
+            $user = User::factory()->create();
+        }
+        $tickets_count = fake()->numberBetween(1, $event->available_tickets);
+        $total_price = round($event->price * $tickets_count, 2);
+        $status = fake()->randomElement(OrderStatusEnum::values());
         return [
             'user_id' => $user->id,
             'event_id' => $event->id,
-            'tickets_count' => fake()->numberBetween(1, 10),
-            'total_price' => $event->price * fake()->numberBetween(1, 10),
-            'status' => fake()->randomElement(OrderStatusEnum::cases()),
+            'tickets_count' => $tickets_count,
+            'total_price' => $total_price,
+            'status' => $status,
         ];
     }
 }
