@@ -20,7 +20,7 @@ class PaymentFactory extends Factory
      */
     public function definition(): array
     {
-        $order = Order::random();
+        $order = Order::inRandomOrder()->first();
         if (!$order) {
             $order = Order::factory()->create();
         }
@@ -29,9 +29,9 @@ class PaymentFactory extends Factory
             'amount' => fake()->randomFloat(2, 1, 1000),
             'provider' => 'stripe',
             'provider_transaction_id' => Str::uuid()->toString(),
-            'payment_method' => fake()->randomElement(['card']),
+            'payment_method' => 'card',
             'status' => fake()->randomElement(PaymentStatusEnum::values()),
-            'notes' => fake()->sentence(),
+            'notes' => fake()->text(),
         ];
     }
 }
