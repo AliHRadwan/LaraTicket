@@ -5,21 +5,20 @@ namespace App\Enums;
 enum OrderStatusEnum: string
 {
     case PENDING = 'pending';
-    case PAID = 'paid';
-    case CANCELLED = 'cancelled';
-    case FAILED = 'failed';
-    case REFUNDED = 'refunded';
     case COMPLETED = 'completed';
+    case CANCELLED = 'cancelled';
+
+    public static function values(): array
+    {
+        return array_column(self::cases(), 'value');
+    }
 
     public function label(): string
     {
         return match ($this) {
             self::PENDING => 'Pending',
-            self::PAID => 'Paid',
-            self::CANCELLED => 'Cancelled',
-            self::FAILED => 'Failed',
-            self::REFUNDED => 'Refunded',
             self::COMPLETED => 'Completed',
+            self::CANCELLED => 'Cancelled',
         };
     }
 
@@ -27,11 +26,8 @@ enum OrderStatusEnum: string
     {
         return match ($this) {
             self::PENDING => 'warning',
-            self::PAID => 'success',
-            self::CANCELLED => 'danger',
-            self::FAILED => 'danger',
-            self::REFUNDED => 'danger',
             self::COMPLETED => 'success',
+            self::CANCELLED => 'danger',
         };
     }
 }
