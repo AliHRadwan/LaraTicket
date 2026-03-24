@@ -1,0 +1,5 @@
+# LaraTicket app
+
+.env
+node_modules
+vendor
