@@ -11,6 +11,7 @@ use App\Mail\VerifyEmail;
 use App\Models\User;
 use App\Notifications\NotificationSystem;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\URL;
@@ -85,34 +86,29 @@ class AuthController extends Controller
         ]);
     }
 
-    public function verifyEmail(Request $request, int $id, string $hash): JsonResponse
+    public function verifyEmail(Request $request, int $id, string $hash): RedirectResponse
     {
-        $user = User::findOrFail($id);
+        $frontendUrl = config('app.frontend_url', 'http://localhost:3000');
+        $user = User::find($id);
 
-        if (! hash_equals($hash, sha1($user->getEmailForVerification()))) {
+        if (! $user || ! hash_equals($hash, sha1($user->getEmailForVerification()))) {
             Log::warning('Invalid email verification attempt', [
                 'user_id' => $id,
                 'ip' => $request->ip(),
             ]);
 
-            return response()->json([
-                'message' => 'Invalid verification link.',
-            ], 403);
+            return redirect("{$frontendUrl}/verify-email?status=invalid");
         }
 
         if ($user->hasVerifiedEmail()) {
-            return response()->json([
-                'message' => 'Email already verified.',
-            ]);
+            return redirect("{$frontendUrl}/verify-email?status=already-verified");
         }
 
         $user->markEmailAsVerified();
 
         Log::info('Email verified', ['user_id' => $user->id]);
 
-        return response()->json([
-            'message' => 'Email verified successfully.',
-        ]);
+        return redirect("{$frontendUrl}/verify-email?status=success");
     }
 
     public function resendVerification(Request $request): JsonResponse
