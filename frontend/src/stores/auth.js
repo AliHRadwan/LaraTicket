@@ -40,10 +40,13 @@ export const useAuthStore = defineStore('auth', () => {
   }
 
   function logout() {
-    const hadToken = !!token.value
+    const staleToken = token.value
     clearAuth()
-    if (hadToken) {
-      api.post('/auth/logout').catch(() => {})
+
+    if (staleToken) {
+      api.post('/auth/logout', null, {
+        headers: { Authorization: `Bearer ${staleToken}` },
+      }).catch(() => {})
     }
   }
 
@@ -58,12 +61,14 @@ export const useAuthStore = defineStore('auth', () => {
   function setAuth(newToken, newUser) {
     token.value = newToken
     user.value = newUser
+    checked.value = true
     localStorage.setItem('token', newToken)
   }
 
   function clearAuth() {
     token.value = null
     user.value = null
+    checked.value = false
     localStorage.removeItem('token')
   }
 
