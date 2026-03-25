@@ -1,0 +1,693 @@
+# LaraTicket — Event Ticketing Platform
+
+A full-stack event ticketing application with a decoupled SPA architecture — **Laravel** (backend API) and **Vue.js** (frontend), powered by **MySQL**, **Redis**, and **Stripe** payments.
+
+---
+
+## Table of Contents
+
+- [About](#about)
+- [Tech Stack](#tech-stack)
+- [Architecture](#architecture)
+- [Features](#features)
+- [Project Structure](#project-structure)
+- [Prerequisites](#prerequisites)
+- [Installation](#installation)
+  - [1. Clone the Repository](#1-clone-the-repository)
+  - [2. Backend Setup](#2-backend-setup)
+  - [3. Frontend Setup](#3-frontend-setup)
+  - [4. Environment Configuration](#4-environment-configuration)
+  - [5. Database & Migrations](#5-database--migrations)
+  - [6. Create an Admin User](#6-create-an-admin-user)
+- [Running the Application](#running-the-application)
+- [API Documentation](#api-documentation)
+- [API Reference](#api-reference)
+  - [Authentication](#authentication)
+  - [Events](#events)
+  - [Orders](#orders)
+  - [Payments](#payments)
+  - [Stripe Webhook](#stripe-webhook)
+- [Admin Dashboard](#admin-dashboard)
+- [Frontend SPA](#frontend-spa)
+- [Testing](#testing)
+- [Stripe Integration](#stripe-integration)
+  - [Webhook Setup](#webhook-setup)
+  - [Payment Flow](#payment-flow)
+- [Environment Variables](#environment-variables)
+- [Author](#author)
+
+---
+
+## About
+
+LaraTicket is an event ticketing system that allows users to browse events, purchase tickets through Stripe Checkout, and receive real-time notifications. Administrators manage the entire platform through a Filament-powered dashboard with revenue analytics, order management, image uploads, and user administration.
+
+---
+
+## Tech Stack
+
+| Layer | Technology | Version |
+|-------|-----------|---------|
+| **Backend API** | Laravel | 12.x |
+| **Frontend SPA** | Vue.js + Tailwind CSS v4 | 3.x |
+| **Build Tool** | Vite | 8.x |
+| **State Management** | Pinia | 2.x |
+| **Routing** | Vue Router | 4.x |
+| **Admin Panel** | Filament | 3.3 |
+| **API Documentation** | Scramble (OpenAPI/Swagger) | 0.13.x |
+| **Authentication** | Laravel Sanctum | 4.x |
+| **Database** | MySQL | 8.x |
+| **Cache & Sessions** | Redis | 7.x |
+| **Queue** | Redis | 7.x |
+| **Payments** | Stripe (Checkout Sessions) | API v2024+ |
+| **Testing** | Pest PHP | 3.x |
+| **PHP** | PHP | 8.2+ |
+
+---
+
+## Architecture
+
+```
+┌─────────────────────────────────┐       ┌──────────────────────────────────┐
+│        Vue.js SPA               │       │       Laravel API (Sanctum)       │
+│     (port 3000)                 │◄─JSON─►│         (port 8000)               │
+│                                 │       │                                    │
+│  Pinia stores ─── Vue Router    │       │  ┌───────────┐  ┌──────────────┐  │
+│  Axios (API) ─── Tailwind v4    │       │  │ Controllers│  │   Policies   │  │
+│  Toast notifications            │       │  └─────┬─────┘  └──────────────┘  │
+└─────────────────────────────────┘       │        │                           │
+                                          │  ┌─────▼─────┐  ┌──────────────┐  │
+┌─────────────────────────────────┐       │  │  Actions   │  │    DTOs       │  │
+│    Filament Admin Panel         │       │  └─────┬─────┘  └──────────────┘  │
+│  (port 8000/admin, SSR)         │       │        │                           │
+│                                 │       │  ┌─────▼─────┐  ┌──────────────┐  │
+│  Dashboard ── Resources         │       │  │  Services  │  │Notifications │  │
+│  Widgets ─── Relation Managers  │       │  └─────┬─────┘  └──────────────┘  │
+└─────────────────────────────────┘       └────────┼───────────────────────────┘
+                                                   │
+                                   ┌───────────────┼───────────────┐
+                                   │               │               │
+                             ┌─────▼─────┐  ┌─────▼─────┐  ┌─────▼─────┐
+                             │   MySQL    │  │   Redis    │  │  Stripe   │
+                             │  Database  │  │Cache/Queue │  │  Gateway  │
+                             └───────────┘  └───────────┘  └───────────┘
+```
+
+**Decoupled SPA** — The frontend and backend are completely independent applications. The Vue.js SPA communicates with the Laravel API exclusively through JSON REST endpoints, authenticated via Sanctum tokens. Vite's dev proxy forwards `/api` requests to the backend. The Filament admin panel runs server-side on the backend at `/admin`. API documentation is auto-generated by Scramble and served at `/docs/api`.
+
+---
+
+## Features
+
+### Public
+- Browse paginated event listings with search and sorting (most recent, event date, price, name)
+- View detailed event pages with rich HTML descriptions and image galleries
+- Register with email verification
+- Login / Logout with Sanctum API tokens
+
+### Authenticated Users
+- Purchase tickets for events via Stripe Checkout
+- View personal order history with payment status badges
+- Receive email and in-app notifications (order placed, completed, cancelled, refunded)
+
+### Admin Dashboard (Filament at `/admin`)
+- **Dashboard** — Revenue stats, order trends (30-day chart), latest orders feed
+- **Events** — Full CRUD with rich text editor, image upload (5 MB max with background optimization), ticket tracking, auto-slug generation
+- **Orders** — View all orders, cancel pending orders, initiate Stripe refunds
+- **Payments** — View all payment records with transaction IDs
+- **Users** — Manage users, toggle admin access, view order history per user
+- **Notifications** — Database notification feed in sidebar
+
+### API Documentation (Scramble at `/docs/api`)
+- Auto-generated OpenAPI/Swagger documentation
+- Interactive API explorer with request/response schemas
+- Available at `http://localhost:8000/docs/api`
+
+### Technical
+- Stripe Checkout Sessions with webhook-driven order completion
+- Idempotent webhook processing (duplicate event protection)
+- Image upload with background processing job (`ProcessEventImage`) — resizes to max 1920px, compresses with GD
+- Multi-channel notification system (email via Mailables + database)
+- Named rate limiters per route group (API, auth, orders, verification)
+- Response caching for event listings and details
+- Route model binding by slug for SEO-friendly URLs
+- Constrained pagination (max 50 per page)
+- Structured logging at correct severity levels
+- Authorization via Laravel Policies + admin Gate
+- Automated test suite (Pest PHP)
+
+---
+
+## Project Structure
+
+```
+LaraTicket/
+├── backend/                    # Laravel 12 API
+│   ├── app/
+│   │   ├── Actions/            # PaymentWebhookAction
+│   │   ├── Contracts/          # PaymentGatewayInterface
+│   │   ├── DTOs/               # PaymentWebhookDTO, NotificationDTO
+│   │   ├── Enums/              # OrderStatusEnum, PaymentStatusEnum, NotificationType
+│   │   ├── Filament/           # Admin panel resources & widgets
+│   │   │   ├── Resources/      # Event, Order, Payment, User resources
+│   │   │   └── Widgets/        # StatsOverview, RevenueChart, LatestOrders
+│   │   ├── Http/
+│   │   │   ├── Controllers/    # API + Auth + Webhook controllers
+│   │   │   └── Requests/       # Form request validation
+│   │   ├── Jobs/               # ProcessEventImage (background optimization)
+│   │   ├── Mail/               # Mailable classes (Blade markdown templates)
+│   │   ├── Models/             # Eloquent models
+│   │   ├── Notifications/      # NotificationSystem (multi-channel)
+│   │   ├── Policies/           # Event, Order, Payment policies
+│   │   ├── Providers/          # AppServiceProvider, AdminPanelProvider
+│   │   └── Services/           # StripePaymentService
+│   ├── database/
+│   │   ├── factories/          # Model factories (User, Event, Order, Payment)
+│   │   ├── seeders/            # Database seeders
+│   │   └── migrations/         # Database schema
+│   ├── resources/views/emails/ # Blade email templates
+│   ├── routes/
+│   │   ├── api.php             # API route definitions
+│   │   └── web.php             # Web routes (Scramble docs)
+│   ├── storage/app/public/     # Uploaded files (event images)
+│   ├── tests/                  # Pest PHP test suite
+│   │   ├── Unit/               # Enums, DTOs, Models
+│   │   └── Feature/            # Auth, API, Webhook, Policies
+│   ├── composer.json
+│   └── phpunit.xml
+├── frontend/                   # Vue.js 3 SPA
+│   ├── src/
+│   │   ├── api/                # Axios instance with auth interceptor
+│   │   ├── components/         # Navbar, Footer, EventCard, StatusBadge,
+│   │   │                       # LoadingSpinner, Toast
+│   │   ├── router/             # Vue Router with auth/guest guards
+│   │   ├── stores/             # Pinia stores (auth, toast)
+│   │   ├── views/              # HomeView, EventDetailView, LoginView,
+│   │   │                       # RegisterView, VerifyEmailView, OrdersView,
+│   │   │                       # OrderSuccessView, OrderCancelView, NotFoundView
+│   │   ├── App.vue             # Root layout (Navbar + RouterView + Footer + Toast)
+│   │   ├── main.js             # Bootstrap (Pinia + Router + mount)
+│   │   └── style.css           # Tailwind v4 import + Inter font theme
+│   ├── index.html
+│   ├── package.json
+│   └── vite.config.js          # Dev proxy, Tailwind plugin, backend URL define
+└── README.md
+```
+
+---
+
+## Prerequisites
+
+Ensure the following are installed on your system:
+
+| Software | Version | Purpose |
+|----------|---------|---------|
+| PHP | >= 8.2 | Backend runtime |
+| Composer | >= 2.x | PHP dependency manager |
+| Node.js | >= 18.x | Frontend tooling |
+| npm | >= 9.x | JS dependency manager |
+| MySQL | >= 8.0 | Primary database |
+| Redis | >= 7.0 | Cache, sessions |
+| Stripe CLI | latest | Webhook forwarding (development) |
+
+---
+
+## Installation
+
+### 1. Clone the Repository
+
+```bash
+git clone https://github.com/alihradwan/LaraTicket.git
+cd LaraTicket
+```
+
+### 2. Backend Setup
+
+```bash
+cd backend
+
+# Install PHP dependencies
+composer install
+
+# Copy environment file
+cp .env.example .env
+
+# Generate application key
+php artisan key:generate
+
+# Create the storage symlink (serves uploaded images)
+php artisan storage:link
+```
+
+### 3. Frontend Setup
+
+```bash
+cd frontend
+
+# Install JS dependencies
+npm install
+```
+
+### 4. Environment Configuration
+
+Edit `backend/.env` with your local settings:
+
+```dotenv
+# Application
+APP_NAME=LaraTicket
+APP_URL=http://localhost:8000
+APP_FRONTEND_URL=http://localhost:3000
+
+# Database (MySQL)
+DB_CONNECTION=mysql
+DB_HOST=127.0.0.1
+DB_PORT=3306
+DB_DATABASE=laraticket
+DB_USERNAME=root
+DB_PASSWORD=your_password
+
+# Redis (Cache & Sessions)
+CACHE_STORE=redis
+SESSION_DRIVER=redis
+REDIS_HOST=127.0.0.1
+REDIS_PORT=6379
+
+# Queue
+QUEUE_CONNECTION=database
+
+# Stripe
+STRIPE_PUBLIC_KEY=pk_test_...
+STRIPE_SECRET_KEY=sk_test_...
+STRIPE_WEBHOOK_SECRET=whsec_...
+PAYMENT_SUCCESS_URL=http://localhost:3000/orders/success
+PAYMENT_CANCEL_URL=http://localhost:3000/orders/cancel
+
+# Mail (SMTP)
+MAIL_MAILER=smtp
+MAIL_HOST=smtp.gmail.com
+MAIL_PORT=587
+MAIL_USERNAME=your_email@gmail.com
+MAIL_PASSWORD=your_app_password
+MAIL_ENCRYPTION=tls
+MAIL_FROM_ADDRESS=noreply@yourdomain.com
+MAIL_FROM_NAME="${APP_NAME}"
+```
+
+Optionally, set the backend URL for the frontend (defaults to `http://localhost:8000`):
+
+```dotenv
+# In frontend/.env (optional)
+VITE_BACKEND_URL=http://localhost:8000
+```
+
+### 5. Database & Migrations
+
+```bash
+# Create the MySQL database
+mysql -u root -p -e "CREATE DATABASE laraticket;"
+
+# Run migrations
+cd backend
+php artisan migrate
+```
+
+### 6. Create an Admin User
+
+```bash
+php artisan tinker
+```
+
+```php
+\App\Models\User::factory()->admin()->create([
+    'name' => 'Admin',
+    'email' => 'admin@laraticket.com',
+    'password' => 'AdminPassword1',
+]);
+```
+
+Or seed the database (in local environment, creates sample users, events, orders, and payments):
+
+```bash
+php artisan db:seed
+```
+
+---
+
+## Running the Application
+
+### Quick Start (all services)
+
+From the `backend/` directory:
+
+```bash
+composer dev
+```
+
+This concurrently starts:
+- **Laravel API** at `http://localhost:8000`
+- **Queue worker** for background jobs (image processing, notifications)
+- **Vite dev server** (frontend assets)
+
+### Manual Start
+
+```bash
+# Terminal 1 — Backend API
+cd backend && php artisan serve
+
+# Terminal 2 — Queue Worker
+cd backend && php artisan queue:listen
+
+# Terminal 3 — Frontend SPA
+cd frontend && npm run dev
+
+# Terminal 4 — Stripe Webhook (development)
+stripe listen --forward-to http://localhost:8000/api/stripe/webhook
+```
+
+### Access Points
+
+| Service | URL |
+|---------|-----|
+| Frontend SPA | http://localhost:3000 |
+| Backend API | http://localhost:8000/api |
+| API Documentation (Swagger) | http://localhost:8000/docs/api |
+| Admin Dashboard (Filament) | http://localhost:8000/admin |
+| Stripe Webhook | `POST /api/stripe/webhook` |
+
+---
+
+## API Documentation
+
+LaraTicket uses **Scramble** to auto-generate interactive OpenAPI/Swagger documentation from the Laravel codebase.
+
+**URL**: [http://localhost:8000/docs/api](http://localhost:8000/docs/api)
+
+The documentation includes:
+- All API endpoints with request/response schemas
+- Authentication requirements per endpoint
+- Request body validation rules
+- Response examples and status codes
+- Interactive "Try it out" API explorer
+
+The documentation is generated automatically — no manual maintenance required.
+
+---
+
+## API Reference
+
+All API endpoints are prefixed with `/api`. Authenticated routes require a `Bearer` token in the `Authorization` header.
+
+### Authentication
+
+| Method | Endpoint | Auth | Rate Limit | Description |
+|--------|----------|------|------------|-------------|
+| `POST` | `/auth/register` | No | 5/min | Register a new user |
+| `POST` | `/auth/login` | No | 5/min | Login and receive token |
+| `POST` | `/auth/logout` | Yes | 5/min | Revoke current token |
+| `GET` | `/auth/user` | Yes | 5/min | Get authenticated user |
+| `GET` | `/auth/email/verify/{id}/{hash}` | Signed | — | Verify email address |
+| `POST` | `/auth/email/resend` | Yes | 3/min | Resend verification email |
+
+#### Register
+
+```bash
+curl -X POST http://localhost:8000/api/auth/register \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "John Doe",
+    "email": "john@example.com",
+    "password": "Password1",
+    "password_confirmation": "Password1"
+  }'
+```
+
+#### Login
+
+```bash
+curl -X POST http://localhost:8000/api/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"email": "john@example.com", "password": "Password1"}'
+```
+
+### Events
+
+| Method | Endpoint | Auth | Description |
+|--------|----------|------|-------------|
+| `GET` | `/events` | No | List events (paginated, searchable) |
+| `GET` | `/events/{slug}` | No | View event details |
+| `POST` | `/events` | Admin | Create an event (supports image upload) |
+| `PUT` | `/events/{slug}` | Admin/Owner | Update an event |
+| `DELETE` | `/events/{slug}` | Admin/Owner | Delete an event |
+
+**Query Parameters** for `GET /events`:
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `search` | string | Filter by title (partial match) |
+| `sort` | string | Sort by: (empty = most recent), `start_date`, `price`, `title` |
+| `upcoming` | boolean | Only future events |
+| `location` | string | Filter by location (partial match) |
+| `per_page` | integer | Items per page (default: 15, max: 50) |
+| `page` | integer | Page number |
+
+### Orders
+
+| Method | Endpoint | Auth | Description |
+|--------|----------|------|-------------|
+| `GET` | `/orders` | Yes | List orders (user: own, admin: all) |
+| `POST` | `/orders` | Yes | Create order → Stripe Checkout URL |
+| `GET` | `/orders/{id}` | Yes | View order details |
+| `PUT` | `/orders/{id}` | Admin | Update order status |
+
+#### Create Order (Purchase Tickets)
+
+```bash
+curl -X POST http://localhost:8000/api/orders \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"event_id": 1, "tickets_count": 2}'
+```
+
+**Response** includes a `checkout_url` — redirect the user to Stripe Checkout.
+
+### Payments
+
+| Method | Endpoint | Auth | Description |
+|--------|----------|------|-------------|
+| `GET` | `/payments` | Admin | List all payments |
+| `GET` | `/payments/{id}` | Admin/Owner | View payment details |
+
+### Stripe Webhook
+
+| Method | Endpoint | Auth | Description |
+|--------|----------|------|-------------|
+| `POST` | `/stripe/webhook` | Stripe Signature | Handle Stripe events |
+
+**Handled Events**: `checkout.session.completed`, `payment_intent.succeeded`, `payment_intent.payment_failed`, `checkout.session.expired`, `charge.refunded`
+
+---
+
+## Admin Dashboard
+
+Access the Filament admin panel at **http://localhost:8000/admin**. Only users with `is_admin = true` can log in. Admin users also see an "Admin" link in the Vue.js frontend navbar.
+
+### Dashboard Widgets
+- **Stats Overview** — Total revenue, orders (today + pending), active events, registered users
+- **Revenue Chart** — 30-day dual-axis chart (revenue + order count)
+- **Latest Orders** — Live feed of the 10 most recent orders
+
+### Resources
+
+| Resource | Capabilities |
+|----------|-------------|
+| **Events** | Full CRUD, rich text editor, image upload (5 MB max, background optimization to 1920px), ticket tracking, orders relation |
+| **Orders** | View, cancel (restores tickets), Stripe refund, payment history |
+| **Payments** | View transaction details, linked order/user/event info |
+| **Users** | Edit profile, toggle admin, view order history, self-protection |
+
+### Image Upload
+
+Event images uploaded through the dashboard are:
+1. Validated (jpg, png, webp, gif — max **5 MB**)
+2. Stored on the `public` disk under `event-images/`
+3. Processed in the background via `ProcessEventImage` job (resized to max 1920px width, compressed at 80% quality)
+4. Served via the `/storage` symlink
+5. Cleaned up when events are deleted
+
+---
+
+## Frontend SPA
+
+The Vue.js frontend is a fully independent single-page application at **http://localhost:3000**.
+
+### Stack
+- **Vue 3** with `<script setup>` composition API
+- **Tailwind CSS v4** with Vite plugin (zero-config)
+- **Pinia** for state management (auth + toast stores)
+- **Vue Router** with auth/guest guards and lazy-loaded routes
+- **Axios** with Bearer token interceptor + 401/429 handling
+- **Heroicons** for consistent iconography
+- **Inter** font via Google Fonts
+
+### Pages
+
+| Page | Route | Description |
+|------|-------|-------------|
+| Home | `/` | Hero section, search, sort dropdown, paginated event grid |
+| Event Detail | `/events/:slug` | Full event info, quantity picker, Stripe checkout redirect |
+| Login | `/login` | Email/password form with validation feedback |
+| Register | `/register` | Registration with password confirmation |
+| Verify Email | `/verify-email` | Verification status + resend link |
+| My Orders | `/orders` | Paginated order history with status badges |
+| Order Success | `/orders/success/:id?` | Payment confirmation page |
+| Order Cancel | `/orders/cancel/:id?` | Payment cancelled page |
+| 404 | `*` | Not found page |
+
+### Key Behaviors
+- Auth tokens persisted in `localStorage`, auto-fetched on app load
+- Unverified users redirected to verify page before purchasing
+- Admin users see an "Admin" navbar link pointing to the Filament dashboard
+- Toast notifications for success/error/rate-limit feedback
+- Responsive design with mobile hamburger menu
+- All routes lazy-loaded for optimal code splitting
+- Backend URL configurable via `VITE_BACKEND_URL` environment variable
+
+---
+
+## Testing
+
+The project uses **Pest PHP** with comprehensive test coverage.
+
+```bash
+cd backend
+
+# Run all tests
+php artisan test
+
+# Run with coverage
+php artisan test --coverage
+
+# Run specific suite
+php artisan test --testsuite=Unit
+php artisan test --testsuite=Feature
+
+# Run specific file
+php artisan test --filter=OrderTest
+```
+
+### Test Coverage
+
+| Suite | Tests | What's Tested |
+|-------|-------|---------------|
+| **Unit/Enums** | 9 | All enum cases, labels, colors, values |
+| **Unit/DTOs** | 6 | Construction, defaults, readonly, custom params |
+| **Unit/Models** | 30 | Fillable, casts, relationships, factory states |
+| **Feature/Auth** | 21 | Register, login, logout, email verification, guards |
+| **Feature/API** | 35 | Events CRUD, orders lifecycle, payments, pagination, filters |
+| **Feature/Webhook** | 9 | Signature verification, all event types, idempotency |
+| **Feature/Policies** | 18 | All policy methods for Event, Order, Payment |
+
+Tests run against an **SQLite in-memory** database with `RefreshDatabase` for full isolation.
+
+---
+
+## Stripe Integration
+
+### Webhook Setup
+
+#### Development (Local)
+
+```bash
+# Install Stripe CLI
+# https://stripe.com/docs/stripe-cli
+
+# Forward webhooks to your local server
+stripe listen --forward-to http://localhost:8000/api/stripe/webhook
+
+# Copy the webhook signing secret (whsec_...) to .env
+# STRIPE_WEBHOOK_SECRET=whsec_...
+```
+
+#### Production
+
+1. Go to [Stripe Dashboard → Webhooks](https://dashboard.stripe.com/webhooks)
+2. Add endpoint: `https://yourdomain.com/api/stripe/webhook`
+3. Select events: `checkout.session.completed`, `checkout.session.expired`, `payment_intent.succeeded`, `payment_intent.payment_failed`, `charge.refunded`
+4. Copy the signing secret to your production `.env`
+
+### Payment Flow
+
+```
+User clicks "Buy Tickets"
+        │
+        ▼
+POST /api/orders ──► Order created (PENDING) + tickets reserved
+        │
+        ▼
+Stripe Checkout Session created ──► User redirected to Stripe
+        │
+        ▼
+User completes payment on Stripe
+        │
+        ▼
+Stripe sends webhook ──► POST /api/stripe/webhook
+        │
+        ▼
+Signature verified ──► PaymentWebhookAction processes event
+        │
+        ▼
+Order marked COMPLETED ──► Payment record created
+        │
+        ▼
+User notified (email + database notification)
+```
+
+---
+
+## Environment Variables
+
+| Variable | Description | Example |
+|----------|-------------|---------|
+| `APP_NAME` | Application name | `LaraTicket` |
+| `APP_URL` | Backend URL | `http://localhost:8000` |
+| `APP_FRONTEND_URL` | Frontend SPA URL | `http://localhost:3000` |
+| `DB_CONNECTION` | Database driver | `mysql` |
+| `DB_DATABASE` | Database name | `laraticket` |
+| `DB_USERNAME` | Database user | `root` |
+| `DB_PASSWORD` | Database password | — |
+| `CACHE_STORE` | Cache driver | `redis` |
+| `SESSION_DRIVER` | Session driver | `redis` |
+| `QUEUE_CONNECTION` | Queue driver | `redis` |
+| `REDIS_HOST` | Redis server | `127.0.0.1` |
+| `STRIPE_PUBLIC_KEY` | Stripe publishable key | `pk_test_...` |
+| `STRIPE_SECRET_KEY` | Stripe secret key | `sk_test_...` |
+| `STRIPE_WEBHOOK_SECRET` | Stripe webhook signing secret | `whsec_...` |
+| `PAYMENT_SUCCESS_URL` | Redirect after successful payment | `http://localhost:3000/orders/success` |
+| `PAYMENT_CANCEL_URL` | Redirect after cancelled payment | `http://localhost:3000/orders/cancel` |
+| `MAIL_MAILER` | Mail driver | `smtp` |
+| `MAIL_HOST` | SMTP host | `smtp.gmail.com` |
+| `MAIL_PORT` | SMTP port | `587` |
+| `MAIL_USERNAME` | SMTP username | — |
+| `MAIL_PASSWORD` | SMTP password (app password) | — |
+| `MAIL_FROM_ADDRESS` | Sender email | `noreply@yourdomain.com` |
+| `VITE_BACKEND_URL` | Backend URL for frontend (optional) | `http://localhost:8000` |
+
+---
+
+## Author
+
+**Ali H. Radwan**
+
+| | |
+|---|---|
+| Email | [alihradwan@outlook.com](mailto:alihradwan@outlook.com) |
+| LinkedIn | [linkedin.com/in/alihradwan](https://linkedin.com/in/alihradwan) |
+| GitHub | [github.com/alihradwan](https://github.com/alihradwan) |
+| WhatsApp | [wa.me/+201001192593](https://wa.me/+201001192593) |
+| Portfolio | [alihradwan.github.io](https://alihradwan.github.io) |
+
+---
+
+## License
+
+This project is open-sourced software licensed under the [MIT License](https://opensource.org/licenses/MIT).
