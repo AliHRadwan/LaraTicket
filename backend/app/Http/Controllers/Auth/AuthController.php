@@ -101,14 +101,14 @@ class AuthController extends Controller
         }
 
         if ($user->hasVerifiedEmail()) {
-            return redirect("{$frontendUrl}/verify-email?status=already-verified");
+            return redirect("{$frontendUrl}/verify-email?status=already-verified&verified_user_id={$user->id}");
         }
 
         $user->markEmailAsVerified();
 
         Log::info('Email verified', ['user_id' => $user->id]);
 
-        return redirect("{$frontendUrl}/verify-email?status=success");
+        return redirect("{$frontendUrl}/verify-email?status=success&verified_user_id={$user->id}");
     }
 
     public function resendVerification(Request $request): JsonResponse
