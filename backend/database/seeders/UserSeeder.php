@@ -19,14 +19,14 @@ class UserSeeder extends Seeder
 
         User::factory()->create([
             'name' => 'Admin',
-            'email' => 'admin@laraticket.duckdns.org',
+            'email' => 'admin@laraticket.com',
             'password' => Hash::make('admin123456'),
             'is_admin' => true,
         ]);
 
         User::factory()->create([
             'name' => 'User',
-            'email' => 'user@laraticket.duckdns.org',
+            'email' => 'user@laraticket.com',
             'password' => Hash::make('user123456'),
             'is_admin' => false,
         ]);

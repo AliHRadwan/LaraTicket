@@ -26,7 +26,7 @@ class DatabaseSeeder extends Seeder
         } else {
             User::create([
                 'name' => 'Admin',
-                'email' => 'admin@laraticket.duckdns.org',
+                'email' => 'admin@laraticket.com',
                 'password' => Hash::make('admin123456'),
                 'is_admin' => true,
             ]);
