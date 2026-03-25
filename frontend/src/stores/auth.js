@@ -40,7 +40,14 @@ export const useAuthStore = defineStore('auth', () => {
   }
 
   function logout() {
-    api.post('/auth/logout').catch(() => {})
+    const hadToken = !!token.value
+    clearAuth()
+    if (hadToken) {
+      api.post('/auth/logout').catch(() => {})
+    }
+  }
+
+  function clearSession() {
     clearAuth()
   }
 
@@ -71,6 +78,7 @@ export const useAuthStore = defineStore('auth', () => {
     login,
     register,
     logout,
+    clearSession,
     resendVerification,
   }
 })

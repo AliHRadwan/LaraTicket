@@ -19,19 +19,29 @@ api.interceptors.request.use((config) => {
   return config
 })
 
+let isHandling401 = false
+
 api.interceptors.response.use(
   (response) => response,
   (error) => {
-    const toast = useToastStore()
+    if (error.response?.status === 401 && !isHandling401) {
+      isHandling401 = true
 
-    if (error.response?.status === 401) {
       const auth = useAuthStore()
-      auth.logout()
-      router.push({ name: 'login', query: { redirect: router.currentRoute.value.fullPath } })
-      toast.error('Session expired. Please log in again.')
+      auth.clearSession()
+
+      const currentRoute = router.currentRoute.value
+      if (currentRoute.name !== 'login' && currentRoute.meta.auth) {
+        router.push({ name: 'login', query: { redirect: currentRoute.fullPath } })
+        const toast = useToastStore()
+        toast.error('Session expired. Please log in again.')
+      }
+
+      setTimeout(() => { isHandling401 = false }, 2000)
     }
 
     if (error.response?.status === 429) {
+      const toast = useToastStore()
       toast.error('Too many requests. Please slow down.')
     }
 
