@@ -2,16 +2,18 @@
 
 namespace App\Actions;
 
-use App\Models\Order;
-use App\Models\ProcessedWebhookEvent;
+use App\DTOs\NotificationDTO;
 use App\DTOs\PaymentWebhookDTO;
+use App\Enums\NotificationType;
 use App\Enums\OrderStatusEnum;
 use App\Enums\PaymentStatusEnum;
-use App\Mail\OrderCompletedEmail;
 use App\Mail\OrderCancelledEmail;
+use App\Mail\OrderCompletedEmail;
 use App\Mail\OrderRefundedEmail;
+use App\Models\Order;
+use App\Models\ProcessedWebhookEvent;
+use App\Notifications\NotificationSystem;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Log;
 
 class PaymentWebhookAction
@@ -19,7 +21,7 @@ class PaymentWebhookAction
     public function handle(PaymentWebhookDTO $dto): object
     {
         if ($this->isEventAlreadyProcessed($dto->stripeEventId)) {
-            Log::info('Duplicate webhook event ignored', [
+            Log::notice('Duplicate webhook event skipped', [
                 'event_id' => $dto->stripeEventId,
                 'event_type' => $dto->eventType,
             ]);
@@ -67,7 +69,7 @@ class PaymentWebhookAction
             $order = Order::findOrFail($dto->orderId);
 
             if ($order->status === OrderStatusEnum::COMPLETED) {
-                Log::info('Order already completed, skipping', ['order_id' => $order->id]);
+                Log::notice('Order already completed, skipping', ['order_id' => $order->id]);
                 return (object) [
                     'success' => true,
                     'message' => 'Order already completed',
@@ -89,8 +91,26 @@ class PaymentWebhookAction
                 ]);
             });
 
-            Log::info('Order completed successfully', ['order_id' => $order->id]);
-            Mail::to($order->user->email)->send(new OrderCompletedEmail($order));
+            Log::info('Order completed', [
+                'order_id' => $order->id,
+                'user_id' => $dto->userId,
+                'amount' => $dto->paymentAmountInCents / 100,
+            ]);
+
+            $order->loadMissing(['user', 'event']);
+
+            $order->user->notify(new NotificationSystem(new NotificationDTO(
+                type: NotificationType::ORDER_COMPLETED,
+                title: "Order #{$order->id} Completed",
+                body: "Your payment for {$order->event->title} has been received. {$order->tickets_count} ticket(s) confirmed.",
+                mailable: new OrderCompletedEmail($order),
+                meta: [
+                    'order_id' => $order->id,
+                    'event_id' => $order->event_id,
+                    'tickets_count' => $order->tickets_count,
+                    'total_price' => $order->total_price,
+                ],
+            )));
 
             return (object) [
                 'success' => true,
@@ -99,7 +119,9 @@ class PaymentWebhookAction
         } catch (\Exception $e) {
             Log::error('Order completion failed', [
                 'order_id' => $dto->orderId,
+                'stripe_event' => $dto->stripeEventId,
                 'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
             ]);
             return (object) [
                 'success' => false,
@@ -114,6 +136,7 @@ class PaymentWebhookAction
             $order = Order::findOrFail($dto->orderId);
 
             if ($order->status === OrderStatusEnum::CANCELLED) {
+                Log::notice('Order already cancelled, skipping', ['order_id' => $order->id]);
                 return (object) [
                     'success' => true,
                     'message' => 'Order already cancelled',
@@ -135,8 +158,25 @@ class PaymentWebhookAction
                 ]);
             });
 
-            Log::info('Payment failed for order', ['order_id' => $order->id]);
-            Mail::to($order->user->email)->send(new OrderCancelledEmail($order));
+            Log::warning('Payment failed for order', [
+                'order_id' => $order->id,
+                'user_id' => $dto->userId,
+                'stripe_event' => $dto->stripeEventId,
+            ]);
+
+            $order->loadMissing(['user', 'event']);
+
+            $order->user->notify(new NotificationSystem(new NotificationDTO(
+                type: NotificationType::ORDER_CANCELLED,
+                title: "Order #{$order->id} Cancelled",
+                body: "Your payment for {$order->event->title} could not be processed. The order has been cancelled.",
+                mailable: new OrderCancelledEmail($order),
+                meta: [
+                    'order_id' => $order->id,
+                    'event_id' => $order->event_id,
+                    'reason' => 'payment_failed',
+                ],
+            )));
 
             return (object) [
                 'success' => true,
@@ -145,7 +185,9 @@ class PaymentWebhookAction
         } catch (\Exception $e) {
             Log::error('Failed to handle payment failure', [
                 'order_id' => $dto->orderId,
+                'stripe_event' => $dto->stripeEventId,
                 'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
             ]);
             return (object) [
                 'success' => false,
@@ -160,6 +202,7 @@ class PaymentWebhookAction
             $order = Order::findOrFail($dto->orderId);
 
             if ($order->status === OrderStatusEnum::CANCELLED) {
+                Log::notice('Order already cancelled (expired), skipping', ['order_id' => $order->id]);
                 return (object) [
                     'success' => true,
                     'message' => 'Order already cancelled',
@@ -168,8 +211,25 @@ class PaymentWebhookAction
 
             $order->update(['status' => OrderStatusEnum::CANCELLED->value]);
 
-            Log::info('Checkout session expired', ['order_id' => $dto->orderId]);
-            Mail::to($order->user->email)->send(new OrderCancelledEmail($order));
+            Log::notice('Checkout session expired', [
+                'order_id' => $dto->orderId,
+                'user_id' => $dto->userId,
+                'stripe_event' => $dto->stripeEventId,
+            ]);
+
+            $order->loadMissing(['user', 'event']);
+
+            $order->user->notify(new NotificationSystem(new NotificationDTO(
+                type: NotificationType::ORDER_CANCELLED,
+                title: "Order #{$order->id} Expired",
+                body: "Your checkout session for {$order->event->title} has expired. Please place a new order if you still wish to attend.",
+                mailable: new OrderCancelledEmail($order),
+                meta: [
+                    'order_id' => $order->id,
+                    'event_id' => $order->event_id,
+                    'reason' => 'session_expired',
+                ],
+            )));
 
             return (object) [
                 'success' => true,
@@ -178,7 +238,9 @@ class PaymentWebhookAction
         } catch (\Exception $e) {
             Log::error('Failed to handle checkout session expiry', [
                 'order_id' => $dto->orderId,
+                'stripe_event' => $dto->stripeEventId,
                 'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
             ]);
             return (object) [
                 'success' => false,
@@ -207,8 +269,26 @@ class PaymentWebhookAction
                 ]);
             });
 
-            Log::info('Charge refunded', ['order_id' => $dto->orderId]);
-            Mail::to($order->user->email)->send(new OrderRefundedEmail($order));
+            Log::info('Charge refunded', [
+                'order_id' => $dto->orderId,
+                'user_id' => $dto->userId,
+                'amount' => $dto->paymentAmountInCents / 100,
+                'stripe_event' => $dto->stripeEventId,
+            ]);
+
+            $order->loadMissing(['user', 'event']);
+
+            $order->user->notify(new NotificationSystem(new NotificationDTO(
+                type: NotificationType::ORDER_REFUNDED,
+                title: "Order #{$order->id} Refunded",
+                body: "Your order for {$order->event->title} has been refunded. " . number_format($order->total_price, 2) . " EGP will be returned to your payment method.",
+                mailable: new OrderRefundedEmail($order),
+                meta: [
+                    'order_id' => $order->id,
+                    'event_id' => $order->event_id,
+                    'refund_amount' => $order->total_price,
+                ],
+            )));
 
             return (object) [
                 'success' => true,
@@ -217,7 +297,9 @@ class PaymentWebhookAction
         } catch (\Exception $e) {
             Log::error('Failed to handle charge refund', [
                 'order_id' => $dto->orderId,
+                'stripe_event' => $dto->stripeEventId,
                 'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
             ]);
             return (object) [
                 'success' => false,
@@ -228,7 +310,12 @@ class PaymentWebhookAction
 
     private function handleUnknownEvent(PaymentWebhookDTO $dto): object
     {
-        Log::warning("Unhandled Stripe event: {$dto->eventType}");
+        Log::warning('Unhandled Stripe event type', [
+            'event_type' => $dto->eventType,
+            'stripe_event' => $dto->stripeEventId,
+            'order_id' => $dto->orderId,
+        ]);
+
         return (object) [
             'success' => false,
             'error' => 'Unhandled Stripe event: ' . $dto->eventType,
