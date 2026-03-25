@@ -12,6 +12,7 @@ use App\Models\User;
 use App\Notifications\NotificationSystem;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\URL;
 
 class AuthController extends Controller
@@ -23,6 +24,11 @@ class AuthController extends Controller
         $this->sendVerificationEmail($user);
 
         $token = $user->createToken('auth-token')->plainTextToken;
+
+        Log::info('User registered', [
+            'user_id' => $user->id,
+            'email' => $user->email,
+        ]);
 
         return response()->json([
             'message' => 'Registration successful. Please check your email to verify your account.',
@@ -38,6 +44,11 @@ class AuthController extends Controller
         $user = User::where('email', $request->email)->first();
 
         if (! $user->hasVerifiedEmail()) {
+            Log::notice('Login blocked: email not verified', [
+                'user_id' => $user->id,
+                'email' => $user->email,
+            ]);
+
             return response()->json([
                 'message' => 'Please verify your email address before logging in.',
                 'requires_verification' => true,
@@ -45,6 +56,8 @@ class AuthController extends Controller
         }
 
         $token = $user->createToken('auth-token')->plainTextToken;
+
+        Log::info('User logged in', ['user_id' => $user->id]);
 
         return response()->json([
             'message' => 'Login successful.',
@@ -55,7 +68,10 @@ class AuthController extends Controller
 
     public function logout(Request $request): JsonResponse
     {
+        $userId = $request->user()->id;
         $request->user()->currentAccessToken()->delete();
+
+        Log::info('User logged out', ['user_id' => $userId]);
 
         return response()->json([
             'message' => 'Logged out successfully.',
@@ -74,6 +90,11 @@ class AuthController extends Controller
         $user = User::findOrFail($id);
 
         if (! hash_equals($hash, sha1($user->getEmailForVerification()))) {
+            Log::warning('Invalid email verification attempt', [
+                'user_id' => $id,
+                'ip' => $request->ip(),
+            ]);
+
             return response()->json([
                 'message' => 'Invalid verification link.',
             ], 403);
@@ -86,6 +107,8 @@ class AuthController extends Controller
         }
 
         $user->markEmailAsVerified();
+
+        Log::info('Email verified', ['user_id' => $user->id]);
 
         return response()->json([
             'message' => 'Email verified successfully.',
@@ -103,6 +126,8 @@ class AuthController extends Controller
         }
 
         $this->sendVerificationEmail($user);
+
+        Log::info('Verification email resent', ['user_id' => $user->id]);
 
         return response()->json([
             'message' => 'Verification email sent.',
