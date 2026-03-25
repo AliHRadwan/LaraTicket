@@ -20,6 +20,7 @@ class Payment extends Model
         'payment_method',
         'status',
         'notes',
+        'idempotency_key',
     ];
 
     protected function casts(): array

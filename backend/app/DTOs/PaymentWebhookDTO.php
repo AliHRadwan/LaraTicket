@@ -9,6 +9,7 @@ readonly class PaymentWebhookDTO
         public int $userId,
         public int $paymentAmountInCents,
         public string $eventType,
+        public string $stripeEventId,
         public string $paymentProvider = 'stripe',
         public ?string $paymentMethod = null,
         public ?string $paymentIntentId = null,

@@ -25,6 +25,8 @@ class StripePaymentService implements PaymentGatewayInterface
                 'user_id' => (string) $order->user_id,
             ], $metadata);
 
+            $idempotencyKey = 'checkout_order_' . $order->id;
+
             $checkoutSession = $this->stripe->checkout->sessions->create([
                 'payment_method_types' => ['card'],
                 'customer_email' => $order->user->email,
@@ -39,11 +41,14 @@ class StripePaymentService implements PaymentGatewayInterface
                     ],
                 ],
                 'mode' => 'payment',
+                'metadata' => $metadata,
                 'payment_intent_data' => [
                     'metadata' => $metadata,
                 ],
                 'success_url' => config('services.payment.success_url') . '/' . $order->id,
                 'cancel_url' => config('services.payment.cancel_url') . '/' . $order->id,
+            ], [
+                'idempotency_key' => $idempotencyKey,
             ]);
 
             return $checkoutSession;
@@ -64,7 +69,11 @@ class StripePaymentService implements PaymentGatewayInterface
                 $params['amount'] = $amountInCents;
             }
 
-            $refund = $this->stripe->refunds->create($params);
+            $idempotencyKey = 'refund_' . $transactionId . '_' . ($amountInCents ?? 'full');
+
+            $refund = $this->stripe->refunds->create($params, [
+                'idempotency_key' => $idempotencyKey,
+            ]);
 
             return $refund->status === 'succeeded';
         } catch (\Exception $e) {

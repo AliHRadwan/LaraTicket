@@ -3,6 +3,7 @@
 namespace App\Actions;
 
 use App\Models\Order;
+use App\Models\ProcessedWebhookEvent;
 use App\DTOs\PaymentWebhookDTO;
 use App\Enums\OrderStatusEnum;
 use App\Enums\PaymentStatusEnum;
@@ -15,16 +16,49 @@ use Illuminate\Support\Facades\Log;
 
 class PaymentWebhookAction
 {
-    public function handle(PaymentWebhookDTO $paymentWebhookData): object
+    public function handle(PaymentWebhookDTO $dto): object
     {
-        return match ($paymentWebhookData->eventType) {
-            'checkout.session.completed' => $this->completeOrder($paymentWebhookData),
-            'payment_intent.succeeded' => $this->completeOrder($paymentWebhookData),
-            'payment_intent.payment_failed' => $this->handlePaymentFailed($paymentWebhookData),
-            'checkout.session.expired' => $this->handleCheckoutSessionExpired($paymentWebhookData),
-            'charge.refunded' => $this->handleChargeRefunded($paymentWebhookData),
-            default => $this->handleUnknownEvent($paymentWebhookData),
+        if ($this->isEventAlreadyProcessed($dto->stripeEventId)) {
+            Log::info('Duplicate webhook event ignored', [
+                'event_id' => $dto->stripeEventId,
+                'event_type' => $dto->eventType,
+            ]);
+            return (object) [
+                'success' => true,
+                'message' => 'Event already processed',
+            ];
+        }
+
+        $result = match ($dto->eventType) {
+            'checkout.session.completed' => $this->completeOrder($dto),
+            'payment_intent.succeeded' => $this->completeOrder($dto),
+            'payment_intent.payment_failed' => $this->handlePaymentFailed($dto),
+            'checkout.session.expired' => $this->handleCheckoutSessionExpired($dto),
+            'charge.refunded' => $this->handleChargeRefunded($dto),
+            default => $this->handleUnknownEvent($dto),
         };
+
+        if ($result->success ?? false) {
+            $this->markEventAsProcessed($dto->stripeEventId, $dto->eventType);
+        }
+
+        return $result;
+    }
+
+    private function isEventAlreadyProcessed(string $eventId): bool
+    {
+        return ProcessedWebhookEvent::where('event_id', $eventId)->exists();
+    }
+
+    private function markEventAsProcessed(string $eventId, string $eventType): void
+    {
+        ProcessedWebhookEvent::firstOrCreate(
+            ['event_id' => $eventId],
+            [
+                'event_type' => $eventType,
+                'processed_at' => now(),
+            ]
+        );
     }
 
     private function completeOrder(PaymentWebhookDTO $dto): object
@@ -33,14 +67,16 @@ class PaymentWebhookAction
             $order = Order::findOrFail($dto->orderId);
 
             if ($order->status === OrderStatusEnum::COMPLETED) {
-                Log::info('Order already completed, skipping duplicate event', ['order_id' => $order->id]);
+                Log::info('Order already completed, skipping', ['order_id' => $order->id]);
                 return (object) [
                     'success' => true,
                     'message' => 'Order already completed',
                 ];
             }
 
-            DB::transaction(function () use ($order, $dto) {
+            $idempotencyKey = 'webhook_payment_' . $dto->stripeEventId;
+
+            DB::transaction(function () use ($order, $dto, $idempotencyKey) {
                 $order->update(['status' => OrderStatusEnum::COMPLETED->value]);
                 $order->payments()->create([
                     'amount' => (float) $dto->paymentAmountInCents / 100,
@@ -49,6 +85,7 @@ class PaymentWebhookAction
                     'payment_method' => $dto->paymentMethod ?? 'card',
                     'status' => PaymentStatusEnum::PAID->value,
                     'notes' => $dto->paymentNotes,
+                    'idempotency_key' => $idempotencyKey,
                 ]);
             });
 
@@ -83,7 +120,9 @@ class PaymentWebhookAction
                 ];
             }
 
-            DB::transaction(function () use ($order, $dto) {
+            $idempotencyKey = 'webhook_payment_' . $dto->stripeEventId;
+
+            DB::transaction(function () use ($order, $dto, $idempotencyKey) {
                 $order->update(['status' => OrderStatusEnum::CANCELLED->value]);
                 $order->payments()->create([
                     'amount' => (float) $dto->paymentAmountInCents / 100,
@@ -92,6 +131,7 @@ class PaymentWebhookAction
                     'payment_method' => $dto->paymentMethod,
                     'status' => PaymentStatusEnum::FAILED->value,
                     'notes' => $dto->paymentNotes,
+                    'idempotency_key' => $idempotencyKey,
                 ]);
             });
 
@@ -152,7 +192,9 @@ class PaymentWebhookAction
         try {
             $order = Order::findOrFail($dto->orderId);
 
-            DB::transaction(function () use ($order, $dto) {
+            $idempotencyKey = 'webhook_payment_' . $dto->stripeEventId;
+
+            DB::transaction(function () use ($order, $dto, $idempotencyKey) {
                 $order->update(['status' => OrderStatusEnum::REFUNDED->value]);
                 $order->payments()->create([
                     'amount' => (float) $dto->paymentAmountInCents / 100,
@@ -161,6 +203,7 @@ class PaymentWebhookAction
                     'payment_method' => $dto->paymentMethod,
                     'status' => PaymentStatusEnum::REFUNDED->value,
                     'notes' => $dto->paymentNotes,
+                    'idempotency_key' => $idempotencyKey,
                 ]);
             });
 
