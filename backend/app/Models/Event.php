@@ -2,10 +2,12 @@
 
 namespace App\Models;
 
+use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Support\Facades\Storage;
 
 class Event extends Model
 {
@@ -26,6 +28,13 @@ class Event extends Model
         'image_url',
     ];
 
+    protected $appends = ['image'];
+
+    public function getRouteKeyName(): string
+    {
+        return 'slug';
+    }
+
     protected function casts(): array
     {
         return [
@@ -33,6 +42,21 @@ class Event extends Model
             'start_datetime' => 'datetime',
             'end_datetime' => 'datetime',
         ];
+    }
+
+    protected function image(): Attribute
+    {
+        return Attribute::get(function () {
+            if (! $this->image_url) {
+                return null;
+            }
+
+            if (str_starts_with($this->image_url, 'http')) {
+                return $this->image_url;
+            }
+
+            return Storage::disk('public')->url($this->image_url);
+        });
     }
 
     public function user(): BelongsTo
