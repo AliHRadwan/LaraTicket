@@ -32,8 +32,28 @@ async function resend() {
 }
 
 onMounted(async () => {
-  if (status.value === 'success' || status.value === 'already-verified') {
-    await auth.fetchUser()
+  if (status.value !== 'success' && status.value !== 'already-verified') {
+    return
+  }
+
+  await auth.fetchUser()
+
+  // New tab shares localStorage with the original tab; token may still be another account.
+  const verifiedParam = route.query.verified_user_id
+  if (verifiedParam === undefined || verifiedParam === null || verifiedParam === '') {
+    return
+  }
+
+  const verifiedId = Number(verifiedParam)
+  if (Number.isNaN(verifiedId)) {
+    return
+  }
+
+  if (auth.isAuthenticated && auth.user?.id !== verifiedId) {
+    auth.clearSession()
+    toast.info(
+      'You opened this link in a new tab while signed in as a different account. Sign in with the email you verified to continue.',
+    )
   }
 })
 </script>

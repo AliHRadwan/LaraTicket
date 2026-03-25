@@ -17,11 +17,18 @@ export const useAuthStore = defineStore('auth', () => {
       return
     }
 
+    const requestToken = token.value
+
     try {
       const { data } = await api.get('/auth/user')
+      if (token.value !== requestToken) {
+        return
+      }
       user.value = data.user
     } catch {
-      clearAuth()
+      if (token.value === requestToken) {
+        clearAuth()
+      }
     } finally {
       checked.value = true
     }

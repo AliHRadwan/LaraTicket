@@ -27,7 +27,13 @@ let isHandling401 = false
 api.interceptors.response.use(
   (response) => response,
   (error) => {
-    if (error.response?.status === 401 && !isHandling401) {
+    const status = error.response?.status
+    const reqUrl = String(error.config?.url ?? '')
+    // Logout may 401 after the client already cleared storage and registered a new user;
+    // never run global session teardown for that response.
+    const skipGlobal401 = reqUrl.includes('auth/logout')
+
+    if (status === 401 && !skipGlobal401 && !isHandling401) {
       isHandling401 = true
 
       const auth = useAuthStore()
