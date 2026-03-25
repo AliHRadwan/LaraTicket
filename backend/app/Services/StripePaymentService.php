@@ -4,7 +4,9 @@ namespace App\Services;
 
 use App\Contracts\PaymentGatewayInterface;
 use App\Models\Order;
+use Stripe\Exception\SignatureVerificationException;
 use Stripe\StripeClient;
+use Stripe\Webhook;
 
 class StripePaymentService implements PaymentGatewayInterface
 {
@@ -18,22 +20,30 @@ class StripePaymentService implements PaymentGatewayInterface
     public function processPayment(Order $order, array $metadata = []): object
     {
         try {
+            $metadata = array_merge([
+                'order_id' => (string) $order->id,
+                'user_id' => (string) $order->user_id,
+            ], $metadata);
+
             $checkoutSession = $this->stripe->checkout->sessions->create([
                 'payment_method_types' => ['card'],
+                'customer_email' => $order->user->email,
                 'line_items' => [
                     [
                         'price_data' => [
                             'currency' => 'egp',
-                            'unit_amount' => round($order->total_price * 100),
+                            'unit_amount' => (int) round($order->total_price * 100),
                             'product_data' => ['name' => 'Order #' . $order->id],
                         ],
                         'quantity' => 1,
                     ],
                 ],
                 'mode' => 'payment',
-                'metadata' => $metadata,
-                'success_url' => config('services.payment.success_url') . $order->id,
-                'cancel_url' => config('services.payment.cancel_url') . $order->id,
+                'payment_intent_data' => [
+                    'metadata' => $metadata,
+                ],
+                'success_url' => config('services.payment.success_url') . '/' . $order->id,
+                'cancel_url' => config('services.payment.cancel_url') . '/' . $order->id,
             ]);
 
             return $checkoutSession;
@@ -47,18 +57,31 @@ class StripePaymentService implements PaymentGatewayInterface
 
     public function refundPayment(string $transactionId, int|null $amountInCents = null): bool
     {
-        $stripe = new StripeClient(config('services.stripe.secret_key'));
         try {
-            $refund = $stripe->refunds->create([
-                'payment_intent' => $transactionId,
-            ]);
-            if ($refund->status === 'succeeded') {
-                return true;
-            } else {
-                return false;
+            $params = ['payment_intent' => $transactionId];
+
+            if ($amountInCents !== null) {
+                $params['amount'] = $amountInCents;
             }
+
+            $refund = $this->stripe->refunds->create($params);
+
+            return $refund->status === 'succeeded';
         } catch (\Exception $e) {
             return false;
+        }
+    }
+
+    public function verifyWebhookPayload(string $payload, string $sigHeader): ?object
+    {
+        try {
+            return Webhook::constructEvent(
+                $payload,
+                $sigHeader,
+                config('services.stripe.webhook_secret')
+            );
+        } catch (SignatureVerificationException|\UnexpectedValueException $e) {
+            return null;
         }
     }
 }
