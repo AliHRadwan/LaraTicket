@@ -3,64 +3,34 @@
 namespace App\Http\Controllers;
 
 use App\Models\Payment;
-use App\Http\Requests\StorePaymentRequest;
-use App\Http\Requests\UpdatePaymentRequest;
+use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
 
 class PaymentController extends Controller
 {
-    /**
-     * Display a listing of the resource.
-     */
-    public function index()
+    public function index(Request $request): JsonResponse
     {
-        //
+        $this->authorize('viewAny', Payment::class);
+
+        $perPage = min($request->integer('per_page', 15), 50);
+
+        $payments = Payment::with([
+            'order:id,user_id,event_id,status',
+            'order.user:id,name,email',
+            'order.event:id,title',
+        ])
+            ->latest()
+            ->paginate($perPage);
+
+        return response()->json($payments);
     }
 
-    /**
-     * Show the form for creating a new resource.
-     */
-    public function create()
+    public function show(Payment $payment): JsonResponse
     {
-        //
-    }
+        $this->authorize('view', $payment);
 
-    /**
-     * Store a newly created resource in storage.
-     */
-    public function store(StorePaymentRequest $request)
-    {
-        //
-    }
-
-    /**
-     * Display the specified resource.
-     */
-    public function show(Payment $payment)
-    {
-        //
-    }
-
-    /**
-     * Show the form for editing the specified resource.
-     */
-    public function edit(Payment $payment)
-    {
-        //
-    }
-
-    /**
-     * Update the specified resource in storage.
-     */
-    public function update(UpdatePaymentRequest $request, Payment $payment)
-    {
-        //
-    }
-
-    /**
-     * Remove the specified resource from storage.
-     */
-    public function destroy(Payment $payment)
-    {
-        //
+        return response()->json([
+            'payment' => $payment->load(['order.user:id,name,email', 'order.event:id,title']),
+        ]);
     }
 }
