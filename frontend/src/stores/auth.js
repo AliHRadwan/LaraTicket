@@ -39,14 +39,20 @@ export const useAuthStore = defineStore('auth', () => {
     return data
   }
 
-  function logout() {
-    const staleToken = token.value
+  async function logout() {
+    const staleToken = token.value || localStorage.getItem('token')
     clearAuth()
 
-    if (staleToken) {
-      api.post('/auth/logout', null, {
+    if (!staleToken) {
+      return
+    }
+
+    try {
+      await api.post('/auth/logout', null, {
         headers: { Authorization: `Bearer ${staleToken}` },
-      }).catch(() => {})
+      })
+    } catch {
+      // Client session is already cleared; ignore network or 401
     }
   }
 
