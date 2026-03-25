@@ -30,7 +30,9 @@ class NotificationSystem extends Notification implements ShouldQueue
     public function toMail(object $notifiable): Mailable|MailMessage
     {
         if ($this->dto->mailable) {
-            return $this->dto->mailable;
+            $recipient = $notifiable->routeNotificationFor('mail', $this);
+
+            return $this->dto->mailable->to($recipient);
         }
 
         $message = (new MailMessage)
