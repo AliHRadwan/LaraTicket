@@ -25,7 +25,9 @@ class StripePaymentService implements PaymentGatewayInterface
                 'user_id' => (string) $order->user_id,
             ], $metadata);
 
-            $idempotencyKey = 'checkout_order_' . $order->id;
+            ksort($metadata);
+
+            $idempotencyKey = $this->checkoutSessionIdempotencyKey($order, $metadata);
 
             $checkoutSession = $this->stripe->checkout->sessions->create([
                 'payment_method_types' => ['card'],
@@ -58,6 +60,31 @@ class StripePaymentService implements PaymentGatewayInterface
                 'message' => $e->getMessage(),
             ];
         }
+    }
+
+    /**
+     * Stripe idempotency keys must only be reused for byte-identical requests.
+     * Fingerprint amount, URLs, email, and metadata so a changed order gets a new key.
+     */
+    private function checkoutSessionIdempotencyKey(Order $order, array $metadata): string
+    {
+        $unitAmount = (int) round($order->total_price * 100);
+        $email = $order->user?->email ?? '';
+        $successUrl = config('services.payment.success_url').'/'.$order->id;
+        $cancelUrl = config('services.payment.cancel_url').'/'.$order->id;
+
+        $fingerprint = hash('sha256', implode("\0", [
+            (string) $order->id,
+            (string) $order->user_id,
+            (string) $unitAmount,
+            'egp',
+            $email,
+            $successUrl,
+            $cancelUrl,
+            json_encode($metadata, JSON_THROW_ON_ERROR),
+        ]));
+
+        return 'checkout_order_'.$order->id.'_'.substr($fingerprint, 0, 32);
     }
 
     public function refundPayment(string $transactionId, int|null $amountInCents = null): bool
