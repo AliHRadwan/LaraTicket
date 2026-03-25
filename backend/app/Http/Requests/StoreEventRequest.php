@@ -9,7 +9,7 @@ class StoreEventRequest extends FormRequest
 {
     public function authorize(): bool
     {
-        return true;
+        return $this->user()->can('create', \App\Models\Event::class);
     }
 
     /**
@@ -25,7 +25,8 @@ class StoreEventRequest extends FormRequest
             'start_datetime' => 'required|date|after:now',
             'end_datetime' => 'nullable|date|after:start_datetime',
             'location' => 'required|string|max:255',
-            'image_url' => 'nullable|url|max:255',
+            'image_url' => 'nullable|url|max:2048',
+            'image' => 'nullable|image|mimes:jpg,jpeg,png,webp,gif|max:5120',
         ];
     }
 
@@ -52,7 +53,10 @@ class StoreEventRequest extends FormRequest
             'location.string' => 'The location field must be a string.',
             'location.max' => 'The location field must be less than 255 characters.',
             'image_url.url' => 'The image URL must be a valid URL.',
-            'image_url.max' => 'The image URL must be less than 255 characters.',
+            'image_url.max' => 'The image URL must be less than 2048 characters.',
+            'image.image' => 'The file must be an image.',
+            'image.mimes' => 'The image must be a JPG, PNG, WebP, or GIF.',
+            'image.max' => 'The image must not exceed 5 MB.',
         ];
     }
 }
