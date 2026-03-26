@@ -11,6 +11,7 @@ use App\Mail\OrderCancelledEmail;
 use App\Mail\OrderCompletedEmail;
 use App\Mail\OrderRefundedEmail;
 use App\Models\Order;
+use App\Models\Payment;
 use App\Models\ProcessedWebhookEvent;
 use App\Notifications\NotificationSystem;
 use Illuminate\Support\Facades\DB;
@@ -254,18 +255,41 @@ class PaymentWebhookAction
         try {
             $order = Order::findOrFail($dto->orderId);
 
-            $idempotencyKey = 'webhook_payment_' . $dto->stripeEventId;
+            $refundNote = 'Refund: '.($dto->paymentAmountInCents / 100).' (webhook '.$dto->stripeEventId.')';
+            if (! empty($dto->paymentNotes)) {
+                $refundNote = trim($dto->paymentNotes).' | '.$refundNote;
+            }
 
-            DB::transaction(function () use ($order, $dto, $idempotencyKey) {
+            DB::transaction(function () use ($order, $dto, $refundNote) {
                 $order->update(['status' => OrderStatusEnum::REFUNDED->value]);
-                $order->payments()->create([
-                    'amount' => (float) $dto->paymentAmountInCents / 100,
-                    'provider' => $dto->paymentProvider,
-                    'provider_transaction_id' => $dto->paymentIntentId,
-                    'payment_method' => $dto->paymentMethod,
-                    'status' => PaymentStatusEnum::REFUNDED->value,
-                    'notes' => $dto->paymentNotes,
-                    'idempotency_key' => $idempotencyKey,
+
+                if (! $dto->paymentIntentId) {
+                    Log::warning('Refund webhook: missing payment_intent', [
+                        'order_id' => $order->id,
+                        'stripe_event' => $dto->stripeEventId,
+                    ]);
+
+                    return;
+                }
+
+                $payment = Payment::query()
+                    ->where('order_id', $order->id)
+                    ->where('provider_transaction_id', $dto->paymentIntentId)
+                    ->first();
+
+                if ($payment) {
+                    $payment->update([
+                        'status' => PaymentStatusEnum::REFUNDED->value,
+                        'notes' => $this->appendPaymentNote($payment->notes, $refundNote),
+                    ]);
+
+                    return;
+                }
+
+                Log::warning('Refund webhook: no payment row for payment_intent (order still marked refunded)', [
+                    'order_id' => $order->id,
+                    'payment_intent' => $dto->paymentIntentId,
+                    'stripe_event' => $dto->stripeEventId,
                 ]);
             });
 
@@ -306,6 +330,19 @@ class PaymentWebhookAction
                 'error' => $e->getMessage(),
             ];
         }
+    }
+
+    private function appendPaymentNote(?string $existing, string $append): string
+    {
+        $append = trim($append);
+        if ($append === '') {
+            return (string) ($existing ?? '');
+        }
+        if ($existing === null || trim((string) $existing) === '') {
+            return $append;
+        }
+
+        return trim((string) $existing)."\n".$append;
     }
 
     private function handleUnknownEvent(PaymentWebhookDTO $dto): object

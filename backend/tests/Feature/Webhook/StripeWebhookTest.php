@@ -5,6 +5,7 @@ use App\Enums\OrderStatusEnum;
 use App\Enums\PaymentStatusEnum;
 use App\Models\Event;
 use App\Models\Order;
+use App\Models\Payment;
 use App\Models\ProcessedWebhookEvent;
 use App\Models\User;
 use Illuminate\Support\Facades\Notification;
@@ -104,11 +105,21 @@ test('webhook handles payment_intent.payment_failed', function () {
 
 test('webhook handles charge.refunded', function () {
     $user = User::factory()->create();
+    $event = Event::factory()->create();
     $order = Order::factory()->completed()->create([
         'user_id' => $user->id,
+        'event_id' => $event->id,
+    ]);
+
+    $paymentIntentId = 'pi_test_refund_match';
+    Payment::factory()->paid()->create([
+        'order_id' => $order->id,
+        'provider_transaction_id' => $paymentIntentId,
+        'amount' => 50,
     ]);
 
     $stripeEvent = fakeStripeEvent('charge.refunded', $order->id, $user->id, [
+        'payment_intent' => $paymentIntentId,
         'amount_refunded' => 5000,
         'amount_total' => null,
     ]);
@@ -121,10 +132,10 @@ test('webhook handles charge.refunded', function () {
     $response->assertOk();
 
     expect($order->fresh()->status)->toBe(OrderStatusEnum::REFUNDED);
-    $this->assertDatabaseHas('payments', [
-        'order_id' => $order->id,
-        'status' => PaymentStatusEnum::REFUNDED->value,
-    ]);
+    expect($order->payments()->count())->toBe(1);
+    $payment = $order->payments()->first();
+    expect($payment->status)->toBe(PaymentStatusEnum::REFUNDED);
+    expect($payment->provider_transaction_id)->toBe($paymentIntentId);
 });
 
 test('webhook handles checkout.session.expired', function () {
