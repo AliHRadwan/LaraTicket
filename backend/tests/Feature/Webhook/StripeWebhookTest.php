@@ -19,7 +19,11 @@ function mockWebhookGateway(?object $stripeEvent): void
     $mock = Mockery::mock(PaymentGatewayInterface::class);
     $mock->shouldReceive('verifyWebhookPayload')->andReturn($stripeEvent);
     $mock->shouldReceive('processPayment')->andReturn((object) ['url' => 'https://test.com']);
-    $mock->shouldReceive('refundPayment')->andReturn(true);
+    $mock->shouldReceive('refundPayment')->andReturn((object) [
+        'success' => true,
+        'message' => null,
+        'refund_id' => 're_test_123',
+    ]);
     app()->instance(PaymentGatewayInterface::class, $mock);
 }
 

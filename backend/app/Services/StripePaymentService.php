@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Contracts\PaymentGatewayInterface;
 use App\Models\Order;
+use Stripe\Exception\ApiErrorException;
 use Stripe\Exception\SignatureVerificationException;
 use Stripe\StripeClient;
 use Stripe\Webhook;
@@ -87,7 +88,7 @@ class StripePaymentService implements PaymentGatewayInterface
         return 'checkout_order_'.$order->id.'_'.substr($fingerprint, 0, 32);
     }
 
-    public function refundPayment(string $transactionId, int|null $amountInCents = null): bool
+    public function refundPayment(string $transactionId, int|null $amountInCents = null): object
     {
         try {
             $params = ['payment_intent' => $transactionId];
@@ -102,9 +103,28 @@ class StripePaymentService implements PaymentGatewayInterface
                 'idempotency_key' => $idempotencyKey,
             ]);
 
-            return $refund->status === 'succeeded';
-        } catch (\Exception $e) {
-            return false;
+            $status = $refund->status ?? '';
+            $ok = in_array($status, ['succeeded', 'pending'], true);
+
+            return (object) [
+                'success' => $ok,
+                'message' => $ok ? null : (string) ($refund->failure_reason ?? "Refund status: {$status}"),
+                'refund_id' => $refund->id ?? null,
+            ];
+        } catch (ApiErrorException $e) {
+            $stripeMessage = $e->getError()?->message ?? $e->getMessage();
+
+            return (object) [
+                'success' => false,
+                'message' => $stripeMessage !== '' ? $stripeMessage : $e->getMessage(),
+                'refund_id' => null,
+            ];
+        } catch (\Throwable $e) {
+            return (object) [
+                'success' => false,
+                'message' => $e->getMessage(),
+                'refund_id' => null,
+            ];
         }
     }
 

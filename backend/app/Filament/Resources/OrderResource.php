@@ -186,7 +186,7 @@ class OrderResource extends Resource
                         $gateway = app(PaymentGatewayInterface::class);
                         $result = $gateway->refundPayment($payment->provider_transaction_id);
 
-                        if (isset($result->id)) {
+                        if ($result->success) {
                             DB::transaction(function () use ($record, $payment) {
                                 $record->update(['status' => OrderStatusEnum::REFUNDED->value]);
                                 $record->event->increment('available_tickets', $record->tickets_count);

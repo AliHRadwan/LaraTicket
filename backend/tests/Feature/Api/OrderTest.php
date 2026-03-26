@@ -17,7 +17,11 @@ function mockPaymentGateway(object $result = null): void
     $mock = Mockery::mock(PaymentGatewayInterface::class);
     $mock->shouldReceive('processPayment')
         ->andReturn($result ?? (object) ['url' => 'https://checkout.stripe.com/test', 'id' => 'cs_test_123']);
-    $mock->shouldReceive('refundPayment')->andReturn(true);
+    $mock->shouldReceive('refundPayment')->andReturn((object) [
+        'success' => true,
+        'message' => null,
+        'refund_id' => 're_test_123',
+    ]);
     app()->instance(PaymentGatewayInterface::class, $mock);
 }
 
